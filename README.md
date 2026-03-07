@@ -1,2 +1,2 @@
-# cHTTPserver
-HTTP server implementation with c
+# cppHTTPserver
+HTTP server implementation with cpp windows
