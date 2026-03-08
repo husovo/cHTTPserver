@@ -10,7 +10,6 @@
 #define BACK_LOG 10
 #define BUFF_SIZE 1024
 
-
 int main(void)
 {
     WSADATA wsaData;
@@ -39,7 +38,6 @@ int main(void)
         WSACleanup();
         return 1;
     }
-    
     
     SOCKET sockfd = INVALID_SOCKET;
     
@@ -76,7 +74,6 @@ int main(void)
 
     while(1)
     {
-        
         client_len = sizeof client;
         // accept cleint connection
         if((client_fd = accept(sockfd,(struct sockaddr *)&client,&client_len)) == INVALID_SOCKET)
@@ -105,14 +102,12 @@ int main(void)
                 WSACleanup();
                 return 1;
             }
-
         }
         if(bytes_recv == 0)
         {
             printf("connection closing");
         }
         closesocket(client_fd);
-
     }
     closesocket(sockfd);
 
