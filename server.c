@@ -87,7 +87,7 @@ int main(void)
         char buffer[BUFF_SIZE];
 
         // http header + response
-        char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n" "Hello from the server";
+        char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
         int bytes_recv = recv(client_fd,buffer,BUFF_SIZE - 1,0);
         if(bytes_recv > 0)
         {
@@ -102,6 +102,22 @@ int main(void)
                 WSACleanup();
                 return 1;
             }
+            // html file
+            FILE *html = fopen("index.html","r");
+            if(!html)
+            {
+                printf("fialed to open file\n");
+                return 1;
+            }
+            char respose[BUFF_SIZE];
+            size_t read = 0;
+            // keep reading till all bytes are read and sent
+            while((read = fread(respose,sizeof respose[0],BUFF_SIZE,html)) > 0)
+            {
+                send(client_fd,respose,read,0);
+            }
+            // close file
+            fclose(html);
         }
         if(bytes_recv == 0)
         {
