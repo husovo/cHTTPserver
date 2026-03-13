@@ -10,6 +10,11 @@
 #define BACK_LOG 10
 #define BUFF_SIZE 1024
 
+//int image_size(FILE *file, size_t *img_size);
+void sendHeader(SOCKET *client);
+int image_size(FILE *file, size_t *img_size);
+void sendImg(SOCKET *client,char *content, size_t *imgSize);
+
 int main(void)
 {
     WSADATA wsaData;
@@ -87,23 +92,29 @@ int main(void)
         char buffer[BUFF_SIZE];
 
         // http header + response
-        char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
         int bytes_recv = recv(client_fd,buffer,BUFF_SIZE - 1,0);
         if(bytes_recv > 0)
         {
             buffer[bytes_recv] = '\0';
             printf("%s",buffer);
+
             
-            // send a simple header + response
-            if(send(client_fd,header,strlen(header),0) == SOCKET_ERROR)
+            FILE *image = fopen("books.jpg","rb");
+            if(!image)
             {
-                printf("Send() Failed: %ld",WSAGetLastError());
-                closesocket(client_fd);
-                WSACleanup();
                 return 1;
             }
-            // html file
-            FILE *html = fopen("index.html","r");
+            size_t img_len = 0;
+            int imgLen = image_size(image,&img_len);
+            char *req = buffer + 4;
+            char *tok = strtok(req, " ");
+
+            if (tok && tok[0] == '/')
+                tok++;
+
+            if (strcmp(tok, "") == 0) {
+                sendHeader(&client_fd);
+                FILE *html = fopen("index.html","r");
             if(!html)
             {
                 printf("fialed to open file\n");
@@ -118,6 +129,26 @@ int main(void)
             }
             // close file
             fclose(html);
+            }
+            else if (strcmp(tok, "books.jpg") == 0) {
+
+                FILE *image = fopen("books.jpg", "rb");
+
+                size_t img_len;
+                image_size(image, &img_len);
+                fclose(image);
+
+                char header[256];
+                snprintf(header, sizeof(header),
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: image/jpeg\r\n"
+                    "Content-Length: %zu\r\n\r\n",
+                    img_len);
+
+                send(client_fd, header, strlen(header), 0);
+                sendImg(&client_fd, "books.jpg", &img_len);
+                
+            }
         }
         if(bytes_recv == 0)
         {
@@ -128,4 +159,51 @@ int main(void)
     closesocket(sockfd);
 
     return 0;
+}
+
+void sendHeader(SOCKET *client)
+{
+    char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+    if(send(*client,header,strlen(header),0) == SOCKET_ERROR)
+    {
+        printf("Send() Failed: %ld",WSAGetLastError());
+        closesocket(*client);
+        WSACleanup();
+        return;
+    }
+}
+
+void sendImg(SOCKET *client,char *content, size_t *imgSize)
+{
+    char buffer[BUFF_SIZE];
+    size_t sum = 0;
+    size_t read = 0;
+    FILE *img = fopen(content,"rb");
+    if(!img)
+    {
+        printf("Image not found\n");
+        return;
+    }else{
+        while((read = fread(buffer,sizeof buffer[0],BUFF_SIZE,img)) > 0)
+        {
+            send(*client,buffer,read,0);
+            sum += read;
+        }
+    }
+}
+int image_size(FILE *file, size_t *img_size)
+{
+    size_t sum = 0;
+    size_t read = 0;
+    char buffer[BUFF_SIZE];
+
+    while ((read = fread(buffer, 1, BUFF_SIZE, file)) > 0) {
+        sum += read;
+    }
+
+    if (ferror(file))
+        return -1;        
+
+    *img_size = sum;      
+    return 1; 
 }
