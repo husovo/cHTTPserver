@@ -10,10 +10,8 @@
 #define BACK_LOG 10
 #define BUFF_SIZE 1024
 
-//int image_size(FILE *file, size_t *img_size);
 void sendHeader(SOCKET *client);
-int image_size(FILE *file, size_t *img_size);
-void sendImg(SOCKET *client,char *content, size_t *imgSize);
+void sendImg(SOCKET *client,char *content, long int *imgSize);
 
 int main(void)
 {
@@ -75,6 +73,8 @@ int main(void)
         return 1;
     }
 
+    printf("listening on port: %s\n",PORT);
+
     SOCKET client_fd = INVALID_SOCKET;
 
     while(1)
@@ -98,14 +98,11 @@ int main(void)
             buffer[bytes_recv] = '\0';
             printf("%s",buffer);
 
-            
             FILE *image = fopen("books.jpg","rb");
             if(!image)
             {
                 return 1;
             }
-            size_t img_len = 0;
-            int imgLen = image_size(image,&img_len);
             char *req = buffer + 4;
             char *tok = strtok(req, " ");
 
@@ -133,11 +130,13 @@ int main(void)
             else if (strcmp(tok, "books.jpg") == 0) {
 
                 FILE *image = fopen("books.jpg", "rb");
-
-                size_t img_len;
-                image_size(image, &img_len);
+                // find the size of the image
+                fseek(image,0L,SEEK_END);
+                long int img_len = ftell(image);
+                rewind(image);
                 fclose(image);
 
+                // send the image header then the image data
                 char header[256];
                 snprintf(header, sizeof(header),
                     "HTTP/1.1 200 OK\r\n"
@@ -146,7 +145,9 @@ int main(void)
                     img_len);
 
                 send(client_fd, header, strlen(header), 0);
+
                 sendImg(&client_fd, "books.jpg", &img_len);
+                fclose(image);
                 
             }
         }
@@ -173,10 +174,9 @@ void sendHeader(SOCKET *client)
     }
 }
 
-void sendImg(SOCKET *client,char *content, size_t *imgSize)
+void sendImg(SOCKET *client,char *content, long int *imgSize)
 {
     char buffer[BUFF_SIZE];
-    size_t sum = 0;
     size_t read = 0;
     FILE *img = fopen(content,"rb");
     if(!img)
@@ -187,23 +187,7 @@ void sendImg(SOCKET *client,char *content, size_t *imgSize)
         while((read = fread(buffer,sizeof buffer[0],BUFF_SIZE,img)) > 0)
         {
             send(*client,buffer,read,0);
-            sum += read;
         }
     }
 }
-int image_size(FILE *file, size_t *img_size)
-{
-    size_t sum = 0;
-    size_t read = 0;
-    char buffer[BUFF_SIZE];
 
-    while ((read = fread(buffer, 1, BUFF_SIZE, file)) > 0) {
-        sum += read;
-    }
-
-    if (ferror(file))
-        return -1;        
-
-    *img_size = sum;      
-    return 1; 
-}
