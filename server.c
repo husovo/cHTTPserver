@@ -112,20 +112,20 @@ int main(void)
             if (strcmp(tok, "") == 0) {
                 sendHeader(&client_fd);
                 FILE *html = fopen("index.html","r");
-            if(!html)
-            {
-                printf("fialed to open file\n");
-                return 1;
-            }
-            char respose[BUFF_SIZE];
-            size_t read = 0;
-            // keep reading till all bytes are read and sent
-            while((read = fread(respose,sizeof respose[0],BUFF_SIZE,html)) > 0)
-            {
-                send(client_fd,respose,read,0);
-            }
-            // close file
-            fclose(html);
+                if(!html)
+                {
+                    printf("fialed to open file\n");
+                    return 1;
+                }
+                char respose[BUFF_SIZE];
+                size_t read = 0;
+                // keep reading till all bytes are read and sent
+                while((read = fread(respose,sizeof respose[0],BUFF_SIZE,html)) > 0)
+                {
+                    send(client_fd,respose,read,0);
+                }
+                // close file
+                fclose(html);
             }
             else if (strcmp(tok, "books.jpg") == 0) {
 
