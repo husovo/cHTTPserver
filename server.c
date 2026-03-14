@@ -11,7 +11,7 @@
 #define BUFF_SIZE 1024
 
 void sendHeader(SOCKET *client);
-void sendImg(SOCKET *client, char *content, long int *imgSize);
+void sendImg(SOCKET *client, char *content, long int *imgSize, FILE *img);
 
 int main(void)
 {
@@ -97,23 +97,30 @@ int main(void)
         {
             buffer[bytes_recv] = '\0';
             printf("%s", buffer);
-            char *line = strtok(buffer,"\r\n");
-            char *method, *path,*version;
-            char *tok = strtok(line," ");
-            if(tok){
-                method = tok;
-                printf("methos= %s\n",method);
-                path = strtok(NULL," ");
-            }
-            if(path && path[0] == '/' && path[1] == '\0')
+            char *line = strtok(buffer, "\r\n");
+            char *method, *path, *version;
+            char *tok = strtok(line, " ");
+            if (tok)
             {
-                sendHeader(&client_fd);
+                method = tok;
+                path = strtok(NULL, " ");
+                version = strtok(NULL, " ");
+            }
+            if (!method || !path || !version)
+            {
+                closesocket(client_fd);
+                continue;
+            }
+            if (path && path[0] == '/' && path[1] == '\0')
+            {
+
                 FILE *html = fopen("index.html", "r");
                 if (!html)
                 {
                     printf("fialed to open file\n");
                     return 1;
                 }
+                sendHeader(&client_fd);
                 char respose[BUFF_SIZE];
                 size_t read = 0;
                 // keep reading till all bytes are read and sent
@@ -124,33 +131,38 @@ int main(void)
                 // close file
                 fclose(html);
             }
-            if(path && path[0] == '/')
+            else
             {
-                path++;
-            }
-
-            if (strcmp(path, "books.jpg") == 0)
-            {
-                FILE *image = fopen(path, "rb");
+                if (path && path[0] == '/')
+                {
+                    path++;
+                }
+                char filepath[256];
+                snprintf(filepath, sizeof(filepath), "%s", path);
+                FILE *image = fopen(filepath, "rb");
                 if (!image)
                 {
-                    return 1;
+                    closesocket(client_fd);
+                    char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n" "NOT FOUND";
+                    send(client_fd, header, strlen(header), 0);
+                    continue;
                 }
                 // find the size of the image
                 fseek(image, 0L, SEEK_END);
                 long int img_len = ftell(image);
                 rewind(image);
 
-                // send the image header then the image data
+                // send the image header
                 char header[256];
                 snprintf(header, sizeof(header),
                          "HTTP/1.1 200 OK\r\n"
                          "Content-Type: image/jpeg\r\n"
                          "Content-Length: %zu\r\n\r\n",
                          img_len);
-
                 send(client_fd, header, strlen(header), 0);
-                sendImg(&client_fd, path, &img_len);
+
+                // send the image data
+                sendImg(&client_fd, filepath, &img_len,image);
                 fclose(image);
             }
         }
@@ -177,11 +189,10 @@ void sendHeader(SOCKET *client)
     }
 }
 
-void sendImg(SOCKET *client, char *content, long int *imgSize)
+void sendImg(SOCKET *client, char *content, long int *imgSize, FILE *img )
 {
     char buffer[BUFF_SIZE];
     size_t read = 0;
-    FILE *img = fopen(content, "rb");
     if (!img)
     {
         printf("Image not found\n");
