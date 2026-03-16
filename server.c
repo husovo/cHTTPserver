@@ -153,7 +153,7 @@ int main(void)
                 // keep reading till all bytes are read and sent
                 while ((read = fread(respose, sizeof respose[0], BUFF_SIZE, html)) > 0)
                 {
-                    send(client_fd, respose, read, 0);
+                    sendall(client_fd, respose, &read);
                 }
                 // close file
                 fclose(html);
@@ -202,12 +202,13 @@ int main(void)
 
 void sendHead(SOCKET client_fd, char*content_type,long len)
 {
-    char header[256];
+    char header[512];
                 snprintf(header, sizeof(header),
-                         "HTTP/1.1 200 OK\r\n"
-                         "Content-Type: %s\r\n"
-                         "Content-Length: %ld\r\n\r\n",
-                         content_type, len);
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: %s\r\n"
+                        "connection: close"
+                        "Content-Length: %ld\r\n\r\n",
+                        content_type, len);
     size_t headerlen = strlen(header);
     if(sendall(client_fd, header, &headerlen)== SOCKET_ERROR)
     {   
@@ -251,7 +252,7 @@ int sendall(SOCKET client_fd, char *buff, size_t *len)
     }
     *len = total;
 
-    return n == -1? SOCKET_ERROR : 0;
+    return (total == bytesleft)? SOCKET_ERROR : 0;
 }
 
 char *get_content_type(char *type)
@@ -262,7 +263,7 @@ char *get_content_type(char *type)
     }else if(strcmp(type,".html") ==0)
     {
         return "text/html";
-    }else
+    }else if(type == "")
     {
         return "text/html";
     }
