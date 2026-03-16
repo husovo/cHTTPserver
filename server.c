@@ -10,8 +10,11 @@
 #define BACK_LOG 10
 #define BUFF_SIZE 1024
 
-void sendHeader(SOCKET *client);
-void sendImg(SOCKET *client, char *content, long int *imgSize, FILE *img);
+
+void sendImg(SOCKET client,FILE *img);
+void sendHead(SOCKET client_fd, char*content_type,long len);
+int sendall(SOCKET client_fd, char *buff, size_t *len);
+char *get_content_type(char *type);
 
 int main(void)
 {
@@ -86,7 +89,7 @@ int main(void)
             printf("Accept() error: %d", WSAGetLastError());
             closesocket(sockfd);
             WSACleanup();
-            return 1;
+            continue;
         }
 
         char buffer[BUFF_SIZE];
@@ -98,29 +101,53 @@ int main(void)
             buffer[bytes_recv] = '\0';
             printf("%s", buffer);
             char *line = strtok(buffer, "\r\n");
-            char *method, *path, *version;
-            char *tok = strtok(line, " ");
-            if (tok)
-            {
-                method = tok;
-                path = strtok(NULL, " ");
-                version = strtok(NULL, " ");
-            }
-            if (!method || !path || !version)
+            char method[20], path[256], protocol[16];
+            sscanf(line,"%s%s%s",method,path,protocol);
+            
+            if (!method || !path || !protocol)
             {
                 closesocket(client_fd);
                 continue;
             }
-            if (path && path[0] == '/' && path[1] == '\0')
+            if(strcmp(method,"GET") != 0)
+            {
+                closesocket(client_fd);
+                continue;
+            }
+            char *type = strrchr(path,'.');
+            if(type == NULL)
+            type = "";
+            char *realpath = path;
+            if(path[0] == '/' && path[1] != '\0'){
+                realpath = path +1;
+            }
+            if(strstr(realpath,".."))
             {
 
+                char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                                "\r\n"
+                                "NOT FOUND";
+                send(client_fd, header, strlen(header),0);
+                    closesocket(client_fd);
+                continue;
+            }
+
+            if ( (path[0] == '/' && path[1] == '\0') )
+            {
+            
                 FILE *html = fopen("index.html", "r");
                 if (!html)
                 {
                     printf("fialed to open file\n");
                     return 1;
                 }
-                sendHeader(&client_fd);
+                // find the size of the html file
+                fseek(html, 0L, SEEK_END);
+                long html_len = ftell(html);
+                rewind(html);
+                char *content_type = get_content_type(type);
+                // send the image header
+                sendHead(client_fd,content_type,html_len);
                 char respose[BUFF_SIZE];
                 size_t read = 0;
                 // keep reading till all bytes are read and sent
@@ -131,39 +158,34 @@ int main(void)
                 // close file
                 fclose(html);
             }
-            else
+            else if(strcmp(type,".jpg") ==0 ||strcmp(type,".jepg") ==0)
             {
-                if (path && path[0] == '/')
-                {
-                    path++;
-                }
                 char filepath[256];
-                snprintf(filepath, sizeof(filepath), "%s", path);
+                snprintf(filepath, sizeof(filepath), "%s", realpath);
                 FILE *image = fopen(filepath, "rb");
                 if (!image)
                 {
                     closesocket(client_fd);
-                    char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n" "NOT FOUND";
+                    char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n"
+                                    "NOT FOUND";
                     send(client_fd, header, strlen(header), 0);
                     continue;
                 }
                 // find the size of the image
                 fseek(image, 0L, SEEK_END);
-                long int img_len = ftell(image);
+                long img_len = ftell(image);
                 rewind(image);
-
+                char *content_type = get_content_type(type);
                 // send the image header
-                char header[256];
-                snprintf(header, sizeof(header),
-                         "HTTP/1.1 200 OK\r\n"
-                         "Content-Type: image/jpeg\r\n"
-                         "Content-Length: %zu\r\n\r\n",
-                         img_len);
-                send(client_fd, header, strlen(header), 0);
+                sendHead(client_fd,content_type,img_len);
 
                 // send the image data
-                sendImg(&client_fd, filepath, &img_len,image);
+                sendImg(client_fd, image);
                 fclose(image);
+            }else
+            {
+                closesocket(client_fd);
+                continue;
             }
         }
         if (bytes_recv == 0)
@@ -177,32 +199,71 @@ int main(void)
     return 0;
 }
 
-void sendHeader(SOCKET *client)
+
+void sendHead(SOCKET client_fd, char*content_type,long len)
 {
-    char header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-    if (send(*client, header, strlen(header), 0) == SOCKET_ERROR)
-    {
-        printf("Send() Failed: %ld", WSAGetLastError());
-        closesocket(*client);
+    char header[256];
+                snprintf(header, sizeof(header),
+                         "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: %s\r\n"
+                         "Content-Length: %ld\r\n\r\n",
+                         content_type, len);
+    size_t headerlen = strlen(header);
+    if(sendall(client_fd, header, &headerlen)== SOCKET_ERROR)
+    {   
+        printf("Send head Failed: %ld", WSAGetLastError());
+        closesocket(client_fd);
         WSACleanup();
         return;
     }
 }
 
-void sendImg(SOCKET *client, char *content, long int *imgSize, FILE *img )
+void sendImg(SOCKET client, FILE *img)
 {
     char buffer[BUFF_SIZE];
     size_t read = 0;
-    if (!img)
+
+    while ((read = fread(buffer, sizeof buffer[0], BUFF_SIZE, img)) > 0)
     {
-        printf("Image not found\n");
-        return;
-    }
-    else
-    {
-        while ((read = fread(buffer, sizeof buffer[0], BUFF_SIZE, img)) > 0)
+        if(sendall(client, buffer, &read) == SOCKET_ERROR)
         {
-            send(*client, buffer, read, 0);
+            printf("Send img Failed: %ld", WSAGetLastError());
+            closesocket(client);
+            WSACleanup();
+            return;
         }
+    }
+}
+
+int sendall(SOCKET client_fd, char *buff, size_t *len)
+{
+    int total = 0;
+    int bytesleft = *len;
+    int n; 
+
+    while(total < *len)
+    {
+        n = send(client_fd, buff+total,bytesleft,0);
+        if(n == SOCKET_ERROR)
+            break;
+        total += n;
+        bytesleft -= n;
+    }
+    *len = total;
+
+    return n == -1? SOCKET_ERROR : 0;
+}
+
+char *get_content_type(char *type)
+{
+    if(strcmp(type,".jpg") ==0 || strcmp(type,".jpeg") == 0)
+    {
+        return "image/jpeg";
+    }else if(strcmp(type,".html") ==0)
+    {
+        return "text/html";
+    }else
+    {
+        return "text/html";
     }
 }
