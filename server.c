@@ -130,10 +130,10 @@ int main(void)
                 closesocket(client_fd);
                 continue;
             }
-
+            printf("%s %s\n",method,path);
             if ((path[0] == '/' && path[1] == '\0'))
             {
-
+                type = "/";
                 FILE *html = fopen("index.html", "r");
                 if (!html)
                 {
@@ -205,7 +205,7 @@ void sendHead(SOCKET client_fd, char *content_type, long len)
     snprintf(header, sizeof(header),
              "HTTP/1.1 200 OK\r\n"
              "Content-Type: %s\r\n"
-             "connection: close"
+             "connection: close\r\n"
              "Content-Length: %ld\r\n\r\n",
              content_type, len);
     size_t headerlen = strlen(header);
@@ -251,7 +251,7 @@ int sendall(SOCKET client_fd, char *buff, size_t *len)
     }
     *len = total;
 
-    return (total == bytesleft) ? SOCKET_ERROR : 0;
+    return (total == *len) ? 0: SOCKET_ERROR;
 }
 
 char *get_content_type(char *type)
@@ -264,8 +264,9 @@ char *get_content_type(char *type)
     {
         return "text/html";
     }
-    else if (type == "")
+    else if (type == "/")
     {
         return "text/html";
     }
+    return "application/octet-stream";
 }
