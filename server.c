@@ -10,10 +10,11 @@
 #define BACK_LOG 10
 #define BUFF_SIZE 1024
 
-void sendImg(SOCKET client, FILE *img);
+void sendImg(SOCKET client_fd, FILE *img);
 void sendHead(SOCKET client_fd, char *content_type, long len);
 int sendall(SOCKET client_fd, char *buff, size_t *len);
 char *get_content_type(char *type);
+void handle_get(SOCKET client_fd, char *path, char *realpath);
 
 int main(void)
 {
@@ -49,7 +50,7 @@ int main(void)
     // A SOCKET object for the server
     if ((sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == INVALID_SOCKET)
     {
-        printf("socket() error: %ld", WSAGetLastError());
+        printf("socket() error: %d", WSAGetLastError());
         freeaddrinfo(res);
         WSACleanup();
         return 1;
@@ -69,7 +70,7 @@ int main(void)
     // listen for incoming connections
     if (listen(sockfd, BACK_LOG) == SOCKET_ERROR)
     {
-        printf("Listen() error: %ld", WSAGetLastError());
+        printf("Listen() error: %d", WSAGetLastError());
         closesocket(sockfd);
         WSACleanup();
         return 1;
@@ -95,104 +96,45 @@ int main(void)
 
         // http header + response
         int bytes_recv = recv(client_fd, buffer, BUFF_SIZE - 1, 0);
-        if (bytes_recv > 0)
+        if (bytes_recv <= 0)
         {
-            buffer[bytes_recv] = '\0';
-
-            char *line = strtok(buffer, "\r\n");
-            char method[20], path[256], protocol[16];
-            sscanf(line, "%s%s%s", method, path, protocol);
-
-            if (!method || !path || !protocol)
-            {
-                closesocket(client_fd);
-                continue;
-            }
-            if (strcmp(method, "GET") != 0)
-            {
-                closesocket(client_fd);
-                continue;
-            }
-            char *type = strrchr(path, '.');
-            if (type == NULL)
-                type = "";
-            char *realpath = path;
-            if (path[0] == '/' && path[1] != '\0')
-            {
-                realpath = path + 1;
-            }
-            if (strstr(realpath, ".."))
-            {
-                char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
-                                "\r\n"
-                                "NOT FOUND";
-                send(client_fd, header, strlen(header), 0);
-                closesocket(client_fd);
-                continue;
-            }
-            printf("%s %s\n",method,path);
-            if ((path[0] == '/' && path[1] == '\0'))
-            {
-                type = "/";
-                FILE *html = fopen("index.html", "r");
-                if (!html)
-                {
-                    printf("fialed to open file\n");
-                    return 1;
-                }
-                // find the size of the html file
-                fseek(html, 0L, SEEK_END);
-                long html_len = ftell(html);
-                rewind(html);
-                char *content_type = get_content_type(type);
-                // send the image header
-                sendHead(client_fd, content_type, html_len);
-                char respose[BUFF_SIZE];
-                size_t read = 0;
-                // keep reading till all bytes are read and sent
-                while ((read = fread(respose, sizeof respose[0], BUFF_SIZE, html)) > 0)
-                {
-                    sendall(client_fd, respose, &read);
-                }
-                // close file
-                fclose(html);
-            }
-            else if (strcmp(type, ".jpg") == 0 || strcmp(type, ".jepg") == 0)
-            {
-                char filepath[256];
-                snprintf(filepath, sizeof(filepath), "%s", realpath);
-                FILE *image = fopen(filepath, "rb");
-                if (!image)
-                {
-                    closesocket(client_fd);
-                    char header[] = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n"
-                                    "NOT FOUND";
-                    send(client_fd, header, strlen(header), 0);
-                    continue;
-                }
-                // find the size of the image
-                fseek(image, 0L, SEEK_END);
-                long img_len = ftell(image);
-                rewind(image);
-                char *content_type = get_content_type(type);
-                // send the image header
-                sendHead(client_fd, content_type, img_len);
-
-                // send the image data
-                sendImg(client_fd, image);
-                fclose(image);
-            }
-            else
-            {
-                closesocket(client_fd);
-                continue;
-            }
+            closesocket(client_fd);
+            continue;
         }
-        if (bytes_recv == 0)
+        buffer[bytes_recv] = '\0';
+
+        char *line = strtok(buffer, "\r\n");
+
+        char method[20], path[256], protocol[16];
+        ;
+
+        if (sscanf(line, "%19s %255s %15s", method, path, protocol) != 3)
         {
-            printf("connection closing");
+            closesocket(client_fd);
+            continue;
         }
-        closesocket(client_fd);
+        char *realpath = path;
+
+        if (path[0] == '/' && path[1] != '\0')
+        {
+            realpath = path + 1;
+        }
+        if (strstr(realpath, ".."))
+        {
+            char header[] = "HTTP/1.1 404 Not Found\r\n"
+                            "Content-Type: text/plain\r\n"
+                            "\r\n"
+                            "NOT FOUND";
+            send(client_fd, header, strlen(header), 0);
+            closesocket(client_fd);
+            continue;
+        }
+        printf("%s %s\n", method, path);
+
+        if (strcmp(method, "GET") == 0)
+        {
+            handle_get(client_fd, path, realpath);
+        }
     }
     closesocket(sockfd);
 
@@ -235,13 +177,14 @@ void sendImg(SOCKET client, FILE *img)
     }
 }
 
-int sendall(SOCKET client_fd, char *buff, size_t *len)
+int sendall(SOCKET client_fd, char *buff, size_t *len) // ref: beej guide
 {
     int total = 0;
     int bytesleft = *len;
+    size_t original_len = *len;
     int n;
 
-    while (total < *len)
+    while (total < original_len)
     {
         n = send(client_fd, buff + total, bytesleft, 0);
         if (n == SOCKET_ERROR)
@@ -251,7 +194,7 @@ int sendall(SOCKET client_fd, char *buff, size_t *len)
     }
     *len = total;
 
-    return (total == *len) ? 0: SOCKET_ERROR;
+    return (total == original_len) ? 0 : SOCKET_ERROR;
 }
 
 char *get_content_type(char *type)
@@ -264,9 +207,60 @@ char *get_content_type(char *type)
     {
         return "text/html";
     }
-    else if (type == "/")
+    else if (strcmp(type, ".css"))
     {
-        return "text/html";
+        return "text/css";
+    }
+    else if (strcmp(type, ".js"))
+    {
+        return "application/javascript";
     }
     return "application/octet-stream";
+}
+void handle_get(SOCKET client_fd, char *path, char *realpath)
+{
+    char filepath[256];
+    if(strcmp(path, "/") == 0)
+    {
+        snprintf(filepath,sizeof(filepath),"index.html");
+    }else{
+        snprintf(filepath,sizeof(filepath),realpath);
+    }
+
+    FILE *file = fopen(filepath, "rb");
+    if(!file)
+    {
+        char header[] = "HTTP/1.1 404 Not Found\r\n"
+                            "Content-Type: text/plain\r\n"
+                            "\r\n"
+                            "NOT FOUND";
+            send(client_fd, header, strlen(header), 0);
+            closesocket(client_fd);
+            return;
+    }
+    // file size
+    fseek(file,0L,SEEK_END);
+    long file_len = ftell(file);
+    rewind(file);
+
+    // extention
+    char *type = strrchr(filepath,'.');
+    if(!type)
+        type = "";
+    char *content_type = get_content_type(type);
+
+    // send the the response header
+    sendHead(client_fd,content_type,file_len);
+
+    //send the file
+    char buffer[BUFF_SIZE];
+    size_t read;
+    while((read = fread(buffer, 1,BUFF_SIZE,file)) > 0)
+    {
+        if(sendall(client_fd,buffer,&read) == SOCKET_ERROR)
+            break;
+    }
+
+    fclose(file);
+    closesocket(client_fd);
 }
